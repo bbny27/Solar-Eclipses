@@ -1,0 +1,418 @@
+---
+title: "DSA2101 Project: 2023 & 2024 US Solar Eclipses"
+author: "Brian Bong Neng Ye, 
+Mandy Yap Zhi Wei, 
+Ong Jia Xi, 
+Lee Ang Xuan
+"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, include = TRUE,
+                      fig.align = "center",  out.width = "80%")
+```
+
+# Introduction
+The **2023 & 2024 US Solar Eclipses** dataset provides a comprehensive view of the solar eclipses observed across the United States on October 14, 2023, and April 8, 2024. An **annular solar eclipse** occurs when the Moon passes between the Sun and the Earth while at its farthest point from Earth. At this distance, the Moon appears smaller and cannot completely block the Sun, creating a "ring of fire" effect visible to those observers in areas within the path of annularity. In contrast, during a **total solar eclipse**, the Moon is closer to Earth, potentially blocking the Sun fully when positioned directly between the Sun and Earth. This creates a brief period of complete darkness for those located within the path of totality.
+
+This dataset includes precise geographical information complete with the longitude and latitude coordinates, names of towns and states as well as timing and visibility details for each solar eclipse. Provided by NASA's Scientific Visualization Studio, the dataset comes in a CSV file containing a total of four excel sheets: **annularity of the 2023 eclipse, totality of the 2024 eclipse, and partial eclipse for both 2023 and 2024**. Our research question focuses on **identifying the best locations for observing a solar eclipse**, considering both total and annular solar eclipses, as well as areas with the longest duration of solar eclipses. To investigate this, we utilised two of the excel sheets, which are `eclipse_annular_2023` with 811 entries and `eclipse_total_2024` with 3330 entries. 
+
+# Overview of Datasets
+First, we loaded the general libraries required.
+```{r preprocessing_1}
+# install.packages("ggplot2")
+# install.packages("ggnewscale")
+
+library(tidyverse)
+library(tidytuesdayR)
+library(ggplot2)
+library(ggnewscale) # will be used for map and barplot
+```
+
+Next, we loaded the datasets to begin our analysis.
+```{r preprocessing_2}
+eclipse_annular_2023 <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2024/2024-04-09/eclipse_annular_2023.csv')
+eclipse_total_2024 <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2024/2024-04-09/eclipse_total_2024.csv')
+```
+
+Since the datasets were already clean, no general cleaning was necessary. 
+As we will deal with `duration` for every visualisation, we first created a new column, `duration`, in each dataset to calculate the eclipse duration between `eclipse_3` (time which totality/annularity starts) and `eclipse_4` (time which totality/annularity ends) in **minutes**. 
+
+Then, we proceeded with the preprocessing steps used in each visualisation, as outlined below. 
+```{r preprocessing_3}
+total_2024_with_duration <- eclipse_total_2024 %>% 
+  mutate(duration = as.numeric(difftime(as.POSIXct(eclipse_4), as.POSIXct(eclipse_3), units = "mins")))
+
+annul_2023_with_duration <- eclipse_annular_2023 %>% 
+   mutate(duration = as.numeric(difftime(as.POSIXct(eclipse_4), as.POSIXct(eclipse_3), units = "mins")))
+
+```
+
+To summarise the data, we computed some key statistics of the preprocessed data, focussing on the geographical locations of the eclipses and the duration of the eclipse. 
+```{r preprocessing_4}
+annul_2023_stats <- annul_2023_with_duration %>%
+  summarise(
+    lat_min = min(lat, na.rm = TRUE),
+    lat_max = max(lat, na.rm = TRUE),
+    lon_min = min(lon, na.rm = TRUE),
+    lon_max = max(lon, na.rm = TRUE),
+    duration_min = min(duration, na.rm = TRUE),
+    duration_max = max(duration, na.rm = TRUE),
+    duration_mean = mean(duration, na.rm = TRUE),
+    duration_sd = sd(duration, na.rm = TRUE)
+  )
+
+total_2024_stats <- total_2024_with_duration %>%
+  summarise(
+    lat_min = min(lat, na.rm = TRUE),
+    lat_max = max(lat, na.rm = TRUE),
+    lon_min = min(lon, na.rm = TRUE),
+    lon_max = max(lon, na.rm = TRUE),
+    duration_min = min(duration, na.rm = TRUE),
+    duration_max = max(duration, na.rm = TRUE),
+    duration_mean = mean(duration, na.rm = TRUE),
+    duration_sd = sd(duration, na.rm = TRUE)
+  )
+
+print("Summary Statistics:")
+print(rbind("Annular 2023" = annul_2023_stats, "Total 2024" = total_2024_stats))
+```
+Based on the descriptive statistics, several key observations are noted. Although the two eclipses span similar latitude ranges, they cover significantly different ranges of longitudes. Additionally, the durations observed in the annular eclipse are notably shorter than those in the total eclipse.
+
+To gain insights into our question, we utilised a variety of visualisations, including a map, bar plot, and scatter plot.
+
+# 1. Map
+A map visualisation is first used to identify the geographical distribution of the eclipses and the paths they traverse. To illustrate these paths, we utilize the geographical coordinates of each observation point, specifically the longitude (`lon`) and latitude (`lat`). Additionally, to examine the relationship between the duration of each observed eclipse and its geographic location, each observation point on the map is color-coded using a gradient scale based on the `duration` of the eclipse observed.
+
+We began by loading the necessary libraries.
+```{r map_1}
+## can uncomment these and run if needed
+# install.packages("tigris")
+# install.packages("sf")
+# install.packages("rnaturalearth")
+
+library(tigris)
+library(sf)
+library(rnaturalearth)
+```
+
+## Data Cleaning and Summary
+Following that, we proceeded with additional preprocessing steps to ensure the datasets were ready for visualisation. This involved adjusting data types, and filtering necessary data for plotting.
+```{r map_2, results = 'hide'}
+us_map <- states(cb = TRUE, resolution = "20m", class = "sf")
+
+total_2024 <- total_2024_with_duration %>% 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+annul_2023 <- annul_2023_with_duration %>% 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+texas <- us_map %>% filter(NAME == "Texas")
+us_map_no_texas <- us_map %>% filter(NAME != "Texas")
+```
+
+## Visualisation
+The variables used—`lat`, `lon`, and `duration` were preprocessed in the 'Data Cleaning and Summary' section above. This visualization offers a general view of how both annular and total eclipses are distributed across the U.S. map. From here, we can proceed to plot the map.
+```{r map_3, fig.height = 12.73, fig.width = 20.00}
+ggplot() +
+  geom_sf(data = us_map_no_texas, fill = "#2B2B2B", color = "#5A5A5A") +
+  geom_sf(data = texas, fill = "#40312f", color = "#5A5A5A") +
+  geom_sf(data = total_2024, aes(color = duration), size = 0.8, alpha = 0.5) +
+  scale_color_viridis_c(option = "mako", name = "Duration of Annular Eclipse on October 14, 2023 (min)", 
+                        labels = scales::comma, 
+                        guide = guide_colorbar(barwidth = 20, barheight = 1, 
+                                               title.position = "top", title.hjust = 0.5,
+                                               title.theme = element_text(family = "Helvetica", size = 14))) +
+  new_scale_color() +
+  geom_sf(data = annul_2023, aes(color = duration), size = 0.8, alpha = 0.5) +
+  scale_color_viridis_c(option = "inferno", name = "Duration of Total Eclipse on April 8, 2024 (min)", 
+                        labels = scales::comma, 
+                        guide = guide_colorbar(barwidth = 20, barheight = 1, 
+                                               title.position = "top", title.hjust = 0.5,
+                                               title.theme = element_text(family = "Helvetica", size = 14))) +
+  coord_sf(crs = st_crs("ESRI:102003"), xlim = c(-2300000, 2200000), ylim = c(-1400000, 1600000)) +
+  theme_minimal(base_family = "Arial") +
+  labs(title = "Path and Duration of Solar Eclipses Over the Continental United States",
+       subtitle = "Annular Eclipse on October 14, 2023 and Total Eclipse on April 8, 2024",
+       caption = "Data: NASA's Scientific Visualization Studio") +
+  annotate("text", x = -2400000, y = -1400000, label = "Each dot on the map represents \nan observation recorded in the town, with the colour \nrepresenting the total duration of the solar eclipse experienced.",
+           color = "#CCCCCC", family = "Helvetica", size = 5.5, hjust = 0) +
+  annotate("text", x = -500000, y = 900000, label = "Path of Annular Eclipse", 
+           color = "white", family = "Helvetica", size = 5, hjust = 0.5) +
+  geom_curve(aes(x = -500000, y = 850000, xend = -1000000, yend = -10000), 
+             color = "white", family = "Helvetica", 
+             arrow = arrow(length = unit(0.3, "cm")), curvature = -0.1) +
+  annotate("text", x = 300000, y = 850000, label = "Path of Total Eclipse", 
+           color = "white", family = "Helvetica", size = 5, hjust = 0.5) +
+  geom_curve(aes(x = 300000, y = 850000, xend = 500000, yend = 12000), 
+             color = "white", family = "Helvetica", 
+             arrow = arrow(length = unit(0.3, "cm")), curvature = 0.2) +
+  annotate("text", x = 300000, y = -1100000, label = "Note that both eclipses \noverlap over the state Texas.", color = "white", size = 5, hjust = 0) +
+  geom_curve(aes(x = 250000, y = -1100000, xend = 190000, yend = -920000), curvature = -0.3, color = "white") + 
+  theme(
+    plot.background = element_rect(fill = "#1E1E1E", color = NA),
+    panel.background = element_rect(fill = "#1E1E1E", color = NA),
+    plot.title = element_text(size = 30, face = "bold", family = "Helvetica", color = "#EDEDED", hjust = 0.5, margin = margin(t = 10, b = 10)),
+    plot.subtitle = element_text(size = 20, color = "#EDEDED", family = "Helvetica", hjust = 0.5),
+    plot.caption = element_text(size = 20, color = "#9A9A9A", family = "Helvetica", hjust = 0.5),
+    legend.background = element_blank(),
+    legend.key = element_blank(),
+    legend.position = "bottom",
+    legend.spacing.x = unit(1, "cm"),
+    legend.title = element_text(size = 12, color = "#EDEDED", family = "Helvetica"),
+    legend.text = element_text(size = 15, color = "#EDEDED", family = "Helvetica"),
+    panel.grid = element_line(color = "#4A4A4A", linetype = "dashed")
+  ) 
+
+```
+
+## Discussion
+Our map visualisation of the U.S. illustrates the path and duration of `eclipse_annular_2023` and `eclipse_total_2024`. Each point on the map represents an observation recorded in a town within its respective state. The **gradient of colours** reflects the eclipse duration: **points shaded from black to yellow** represent the duration of `eclipse_total_2024`, while the **points shaded from black to light blue** represent the duration of `eclipse_annular_2023`. As the colour of the points changes from **black to a lighter shade—yellow for the total eclipse and light blue for the annular eclipse—the duration of the eclipse increases**. The map features **two intersecting lines**, with the line on the left representing the path of  `eclipse_annular_2023` and the bar on the line representing the path of `eclipse_total_2024`. In both lines, there is a **clear trend where colour brightness increases from the bar's edge toward its centre**, indicating that locations at the centre of the path would observe longer eclipses. Additionally, the intersecting area of the two lines marks the state of Texas, meaning that certain areas in Texas have experienced the annular eclipse in 2023 and will experience the total eclipse in 2024. We observe that certain states have experienced longer eclipses - we would try to quantify such observation in **Visualisation 2**. 
+
+# 2. Barplot
+A barplot visualization is used to rank states by the average duration of each eclipse observed within them. This approach allows us to identify which states experience the longest eclipse durations on average for both the annular and total eclipses. By comparing these averages, the visualization also helps reveal any states that might be positioned to observe both types of eclipses. Highlighting such states could provide valuable insights into regions with optimal viewing opportunities across both eclipse events. To visualise, we extract information from `state` to identify the state in which the observation is made, `name` of the town, and the `duration` of the eclipse observed.
+
+We began by loading the necessary libraries.
+```{r barplot_1}
+# install.packages("usa")
+library(usa)
+```
+
+## Data Cleaning and Summary
+For both `eclipse_total_2024` and `eclipse_annular_2023` datasets, we selected the columns `state`, `name` and `duration`.
+
+Afterwards, we merged the two datasets, renamed and relocated certain columns, and prepared the data for plotting the graph.
+```{r barplot_2}
+total_2024 <- total_2024_with_duration %>% 
+  select(state, name, duration) %>% 
+  left_join(usa::states, by = c("state" = "abb")) %>%
+  select(state, duration, name.y) %>%
+  rename(state_name = name.y) %>%
+  relocate(state_name, .after = state)
+  
+annul_2023 <- annul_2023_with_duration %>% 
+  select(state, name, duration) %>% 
+  left_join(usa::states, by = c("state" = "abb")) %>%
+  select(state, duration, name.y) %>%
+  rename(state_name = name.y) %>%
+  relocate(state_name, .after = state)
+```
+
+The variable used to create the bar plot is the mean duration of each eclipse, calculated for each state across both eclipses.
+```{r barplot_3}
+total_state_mean <- total_2024 %>% 
+  group_by(state_name) %>% 
+  summarise(mean_duration = mean(duration)) %>%
+  arrange(mean_duration)
+
+annul_state_mean <- annul_2023 %>% 
+  group_by(state_name) %>% 
+  summarise(mean_duration = mean(duration)) %>%
+  arrange(desc(mean_duration))
+
+state_order <- total_state_mean %>% 
+  full_join(annul_state_mean, by = "state_name", suffix = c("_total", "_annul")) %>%
+  pull(state_name)
+
+interval_size <- 0.01
+
+# Create finer-grained data by expanding each observation into small intervals
+df_plot <- total_state_mean %>%
+  full_join(annul_state_mean, by = "state_name", suffix = c(".total", ".annul")) %>%
+  mutate(
+    state_name = factor(state_name, levels = state_order),
+    mean_duration.total = ifelse(is.na(mean_duration.total), 0, mean_duration.total),
+    mean_duration.annul = ifelse(is.na(mean_duration.annul), 0, mean_duration.annul)
+    ) %>%
+  pivot_longer(cols = starts_with("mean_duration"), names_to = "type", values_to = "duration") %>%
+  group_by(state_name, type) %>%
+  # Split each duration into smaller intervals
+  mutate(segment = list(seq(0, duration, by = interval_size))) %>%
+  unnest(segment) %>%
+  ungroup()
+
+df_plot_total <- df_plot %>% filter(type == "mean_duration.total")
+df_plot_annul <- df_plot %>% filter(type == "mean_duration.annul")
+```
+
+## Visualisation
+The variables that we will be using are processed in our data preprocessing section, which are `state_name`, `mean_duration.total`, and `mean_duration.annul`. This type of visualisation can give us the durations for total and annular eclipses happened in each state so we can dive further into it using the information given by this visualisation.
+
+With the data prepared, we are now ready to proceed with **plotting**.
+```{r barplot_4}
+options(repr.plot.width = 7, repr.plot.height = 4.5)
+ggplot(df_plot, aes(x = state_name)) +
+
+  # Total eclipse bars (left side) with gradient segments
+  geom_tile(data = df_plot_total,
+            aes(y = -segment, height = interval_size, fill = segment),
+            width = 0.8, show.legend = TRUE) +
+  scale_fill_viridis_c(option = "magma", name = "Total Eclipse Duration in 2024 (min)",
+                       limits = c(0, 3.5), direction = -1) +
+
+  # Separate fill scale for annular eclipse
+  new_scale_fill() +
+
+  # Annular eclipse bars (right side) with gradient segments
+  geom_tile(data = df_plot_annul,
+            aes(y = segment, height = interval_size, fill = segment),
+            width = 0.8, show.legend = TRUE) +
+  scale_fill_viridis_c(option = "mako", name = "Annular Eclipse Duration in 2023 (min)",
+                       limits = c(0, 4), direction = -1) +
+
+  scale_y_continuous(breaks = seq(-4, 4, by = 1), labels = abs(seq(-4, 4, by = 1))) +
+  coord_flip() +
+  labs(x = NULL, y = "Mean Duration (minutes)",
+    title = "Mean Duration of Annular Eclipse and Total Eclipse (Projection)",
+    subtitle = "... across different states in the United States in 2023 & 2024",
+    caption = "Data: NASA's Scientific Visualization Studio") +
+  theme_minimal(base_family = "AppleGothic") +
+  theme(
+    plot.background = element_rect(fill = "grey20", color = NA),
+    panel.background = element_rect(fill = "grey20", color = NA),
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    axis.text = element_text(color = "white", family = "Helvetica", size = 6),
+    axis.text.y = element_text(color = "white", family = "Helvetica", size = 8),
+    axis.title.x = element_text(color = "white", family = "Helvetica", size = 8),
+    plot.title = element_text(color = "white", face = "bold", family = "Helvetica", size = 10, hjust = 0.4),
+    plot.caption = element_text(color = "white", family = "Helvetica", size = 6),
+    plot.subtitle = element_text(color = "white", family = "Helvetica", size = 8, hjust = 0.29),
+    legend.position = "top",
+    legend.title = element_text(color = "white", family = "Helvetica", size = 6),
+    legend.text = element_text(color = "white", family = "Helvetica", size = 6)
+  ) +
+  geom_segment(aes(x = 15.5, xend = 15.5, y = -2.75, yend = -3.25),
+               lineend = "round", linejoin = "bevel",
+               size = 1, arrow = arrow(length = unit(0.1, "inches")), color = viridis::magma(n=1, begin = 0.3)) +
+  geom_text(aes(x = 15.5, y = -1.5, label = "Increasing Total Eclipse Duration"), family = "Helvetica",  color = viridis::magma(n=1, begin = 0.45), size = 3) +
+  geom_segment(aes(x = 10.5, xend = 10.5, y = 3, yend = 3.75),
+               lineend = "round", linejoin = "bevel",
+               size = 1, arrow = arrow(length = unit(0.1, "inches")), color = viridis::mako(n=1, begin = 0.6)) +
+  geom_text(aes(x = 10.5, y = 1.65, label = "Increasing Annular Eclipse Duration"), family = "Helvetica", color = viridis::mako(n=1, begin = 0.85), size = 3) +
+  geom_curve(aes(xend = 3.5, yend = 1.5, x = 11.5, y = 0.2), lineend = "round", linejoin = "bevel",
+             arrow = arrow(length = unit(0.02, "npc")),
+             size = 0.5, color = "white") +
+  annotate("text", x = 3.5, y = 1.6, label = "Texas is the only state in the US where\nannular eclipse and total eclipse can\nboth occur in 2023 and 2024 respectively.", size = 2.2, color = "white", family = "Helvetica", fontface = "bold", hjust = "left")
+
+```
+
+## Discussion
+In our bar plot visualisation, we showcased the **mean durations of annular and total solar eclipses across various states in the United States in 2023 and 2024**. The left side of the plot displays the projected **total eclipse duration for each state in 2024**, with its mean duration increasing as the bar moves to the left. Concurrently, the right side presents the **mean annular eclipse duration for each state from 2023**, with increasing mean duration as the bar extends further to the right. Notably, `Texas` stands out as the only state where an annular eclipse has happened in 2023 and a total eclipse is anticipated in 2024, making it a prime destination for eclipse enthusiasts. In 2023, Texas experienced one of the longest annularity durations, which lasted approximately `3.76` minutes. The state is also projected to have one of the longest totality durations in 2024 across all states, lasting around `3.25` minutes. This phenomenon highlights `Texas` as a unique location in the contiguous United States for observing both types of solar eclipses, providing a rare and unparalleled experience for those interested in celestial events. 
+
+# 3. Scatterplot
+Having identified Texas as the ideal state for observing both eclipses, we conduct a more detailed analysis by using a scatterplot to pinpoint towns within Texas that would be well-suited for both observations. The scatterplot visualizes each town's geographic location and the duration of the eclipses observed there, allowing us to assess which towns offer optimal viewing conditions for both events. To conduct the visualisation, we filtered the data by `state` to obtain observations conducted in **Texas**, before using the `duration` to plot the observations and the `name` to label the observations.
+
+Firstly, load the libraries required.
+```{r scatterplot_1}
+# install.packages("plotly") # can uncomment and run if needed
+library(plotly)
+```
+
+## Data Cleaning and Summary
+We filtered the data to focus on Texas and renamed the duration columns for consistency, ensuring a smooth join of the total and annular eclipse datasets.
+```{r scatterplot_2}
+abb_for_Texas <- state.abb[match("Texas", state.name)]
+
+texas_total_2024 <- 
+  total_2024_with_duration %>% 
+  filter(state == abb_for_Texas) %>% # abbreviation for Texas
+  rename(total_duration = duration) %>%
+  select(name, lat, lon, total_duration)
+
+texas_annul_2023 <- 
+  annul_2023_with_duration %>% 
+  filter(state == abb_for_Texas) %>% # abbreviation for Texas
+  rename(annul_duration = duration) %>%
+  select(name, lat, lon, annul_duration)
+```
+
+Before joining both total eclipse data and annular eclipse data into a single dataframe for plotting the scatterplot, we first checked the **uniqueness of the columns** to determine the most efficient way to join them.
+```{r scatterplot_3}
+texas_annul_2023 %>%
+  count(lat, lon) %>% 
+  filter(n > 1)
+
+texas_annul_2023 %>%
+  count(lat, lon) %>%
+  filter(n > 1)
+```
+
+As shown, all lat and lon pairs are unique within the datasets. Therefore, these pairs can serve as **indicator** to join the dataframes if needed.
+```{r scatterplot_4}
+texas_annul_2023 %>%
+  count(name) %>%
+  filter(n > 1)
+
+# as an example to check if the lat and lon are the same or not
+texas_annul_2023 %>%
+  filter(name == "Chula Vista")
+
+texas_total_2024 %>%
+  count(name) %>%
+  filter(n > 1)
+```
+
+We can observe that the city in a state can contain at most 2 rows of data with different lat and lon pairs. Therefore, using only city names as a joining key is not sufficient.
+
+After reviewing the datasets, we decided to join them according to name, lat and lon.
+```{r scatterplot_5}
+joined_total_annul <- texas_annul_2023 %>% 
+  inner_join(texas_total_2024, by = c("name", "lat", "lon")) %>%
+  select(name, annul_duration, total_duration)
+```
+
+## Visualisation
+The variables that we are using are processed in our data preprocessing section, which are `name`, `total_duration`, and `annul_duration`. This type of visualisation can give us the longest durations for both total and annular eclipses happening in every town in `Texas` so we can find out the top destination for eclipse enthusiasts.
+
+Finally, we can start with our **plotting** of scatterplot.
+```{r scatterplot_6}
+scatter_plot <- ggplot(data = joined_total_annul) + 
+  geom_abline(color = "white") + 
+  geom_point(mapping = aes(x = annul_duration, y = total_duration, 
+                           text = paste("Town: ", name, "<br>Annularity Duration: ",
+                                        round(annul_duration,2), "min", "<br>Totality Duration: ", round(total_duration,2), "min")), 
+             size = 3,
+             color = "#FF9D00", #FF7600
+             alpha = 0.55) + 
+  labs(title = "Relationship Between Duration of <br>2023 Annularity and 2024 Totality in Texas", 
+       x = "Duration of Annularity in 2023 (min)", 
+       y = "Duration of Totality in 2024 (min)") + 
+  theme(plot.title = element_text(color = "#FFFDD0", family = "Helvetica", face = "bold", size=14, hjust = 0.5),
+        rect = element_rect(fill = "#222222", color = "white"),
+        axis.title = element_text(color = "#FFFDD0", family = "Helvetica", size=12),
+        axis.text = element_text(color = "#eaeaea"),
+        axis.line = element_line(color = "#969696", linetype = 1), 
+        panel.background = element_rect(fill = "#222222", color = NULL),
+        panel.border = element_blank(),
+        panel.grid = element_line(color = "#1c1b1b"),
+        panel.grid.major = element_line(color = "#353535"),
+        plot.background = element_rect(fill = "#222222", colour = "#222222", linetype = 0))
+
+ggplotly(scatter_plot, tooltip = "text") %>%
+  style(hoverlabel = list(font = list(family = "Helvetica", size = 14, color = "#222222"),
+      bgcolor = "#FFFDD0",  # Set hover text background color
+      bordercolor = "black"   # Set border color around hover text
+      ))
+```
+
+## Discussion
+Through our scatterplot visualisation, we focused on the state of `Texas` to examine **the relationship between the durations of the 2023 annular and 2024 total solar eclipses**. By plotting observations across towns in Texas, we identified the best towns with the longest durations for viewing both annular and total solar eclipses, located at the most **top right of the plot**. These towns are `Leakey`, which was recorded to have `4.75` minutes of **annular solar eclipse in 2023** and `4.34` minutes of **total solar eclipse in 2024**, and `Utopia`, which was recorded to have `4.85` minutes of **annular solar eclipse in 2023** and `4.38` minutes of **total solar eclipse in 2024**. Thus, this makes them ideal observation spots for viewers who wish to **maximise their experience of both types of solar eclipses**. We included an **abline** in the scatterplot as a **reference** to help interpret the relationship between the durations of both types of solar eclipses. The diagonal line represents a situation where the duration of the 2023 annular eclipse is equal to the duration of the 2024 total eclipse. Therefore, towns plotted close to this line experience relatively balanced durations for both eclipse types. Deviations from the reference line indicate towns where one type of eclipse has a longer duration than the other.
+
+# Conclusion
+Through the three visualisations—**a map, bar plot, and scatterplot**—we conclude that the state of `Texas` is the **go-to destination** for eclipse enthusiasts. It is the **only state where people can experience both types of solar eclipses**, annular and total, while also enjoying the longest durations of each eclipse. In particular, the towns of `Utopia` and `Leakey` in Texas offer the **best opportunities for observing both types of solar eclipses**, with the **longest durations** of full solar eclipses recorded for each.
+
+# Teamwork
+The project work was split evenly among the four members. **Brian Bong Neng Ye** preprocessed the data required and completed the map visualisation for the project. **Mandy Yap Zhi Wei** compiled the visualisations into a Markdown file and wrote the descriptions for the project, standardised aesthetic choices among charts. **Ong Jia Xi** preprocessed the data required and completed the barplot visualisation for the project. **Lee Ang Xuan** preprocessed the data required and completed the scatterplot visualisation for the project. Overall, the group found the work delegation satisfactory, with regular communication and ample discussion space within the group.
+
+# References
+2023 & 2024 US Solar Eclipses,  NASA's Scientific Visualization Studio, https://github.com/rfordatascience/tidytuesday/blob/master/data/2024/2024-04-09/readme.md
+
+
